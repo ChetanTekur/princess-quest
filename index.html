@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Princess Quest: The Castle Escape</title>
+    <!-- React & Tailwind -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Retro Font -->
+    <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'VT323', monospace;
+            background-color: #2c2c2c;
+            margin: 0;
+            overflow: hidden;
+            image-rendering: pixelated;
+            user-select: none;
+        }
+        .castle-room {
+            width: 100vw;
+            height: 100vh;
+            background-color: #f4d1d1;
+            position: relative;
+        }
+        .pixel-floor {
+            height: 25%;
+            background: #f8e9a1;
+            border-top: 8px solid #c99e10;
+            width: 100%;
+            position: absolute;
+            bottom: 0;
+            z-index: 10;
+        }
+        .princess-walk {
+            animation: stomp 0.5s steps(4) infinite;
+        }
+        @keyframes stomp {
+            0% { transform: translateY(0); }
+            25% { transform: translateY(-10px); }
+            50% { transform: translateY(0); }
+            75% { transform: translateY(-10px); }
+        }
+        .pixel-card {
+            border: 6px solid #24305e;
+            background: #fff;
+            box-shadow: 12px 12px 0 rgba(0,0,0,0.3);
+        }
+        .pixel-btn {
+            border: 4px solid #24305e;
+            transition: all 0.1s;
+            cursor: pointer;
+        }
+        .pixel-btn:active {
+            transform: translate(4px, 4px);
+            box-shadow: none;
+        }
+        .interactive-obj {
+            cursor: pointer;
+            transition: transform 0.2s;
+            z-index: 5;
+        }
+        .interactive-obj:hover {
+            transform: scale(1.2) rotate(5deg);
+        }
+        /* Layering */
+        .layer-furniture { z-index: 5; }
+        .layer-character { z-index: 20; }
+        .layer-ui { z-index: 50; }
+        .layer-modal { z-index: 100; }
+        .layer-feedback { z-index: 200; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef } = React;
+
+        // --- QUESTION GENERATOR ---
+        const generateQuestionBank = () => {
+            const bank = {
+                addition: [],
+                subtraction: [],
+                logic: [],
+                spelling: [],
+                recog: [],
+                shape: [],
+                count: []
+            };
+            let idCounter = 0;
+
+            const createOptions = (correct, distractors) => {
+                const unique = [...new Set(distractors)].filter(d => d !== correct);
+                const wrong = unique.sort(() => Math.random() - 0.5).slice(0, 2);
+                return [correct, ...wrong].sort(() => Math.random() - 0.5);
+            };
+
+            const add = (cat, q, opts, ans, hint) => {
+                bank[cat].push({ id: `q-${idCounter++}`, q, opts, ans, hint, type: cat });
+            };
+
+            // 1. ADDITION (1-9 + 1-9)
+            for (let i = 1; i <= 9; i++) {
+                for (let j = 1; j <= 9; j++) {
+                    const sum = i + j;
+                    add('addition', `What is ${i} + ${j}?`, createOptions(`${sum}`, [`${sum+1}`, `${sum-1}`, `${sum+2}`]), `${sum}`, `Use your fingers!`);
+                }
+            }
+
+            // 2. SUBTRACTION (1-9 minus 1-9)
+            for (let i = 2; i <= 9; i++) {
+                for (let j = 1; j < i; j++) {
+                    const res = i - j;
+                    add('subtraction', `What is ${i} - ${j}?`, createOptions(`${res}`, [`${res+1}`, `${res-1}`, `${res+2}`]), `${res}`, `Take away ${j}!`);
+                }
+            }
+
+            // 3. LOGIC (Patterns)
+            const patterns = [
+                { seq: '🔴 🔵 🔴', ans: '🔵', wrong: ['🔴', '⭐', '🟩'] },
+                { seq: '⭐ ⭐ 🌙', ans: '🌙', wrong: ['⭐', '☀️', '☁️'] },
+                { seq: '🐶 🐱 🐶', ans: '🐱', wrong: ['🐶', '🐮', '🐷'] },
+                { seq: 'A B A B', ans: 'A', wrong: ['B', 'C', 'D'] },
+                { seq: '1 2 1 2', ans: '1', wrong: ['2', '3', '4'] },
+                { seq: '🔺 🔻 🔺', ans: '🔻', wrong: ['🔺', '⬛', '⚪'] }
+            ];
+            patterns.forEach(p => add('logic', `Pattern: ${p.seq} ...?`, createOptions(p.ans, p.wrong), p.ans, "What comes next?"));
+
+            // 4. SPELLING (Fixed: No ambiguous words)
+            const words = [
+                { w: 'FISH', d: 'F _ S H', a: 'I', x: ['A', 'O', 'U'] }, 
+                { w: 'MILK', d: 'M _ L K', a: 'I', x: ['A', 'O', 'U'] }, 
+                { w: 'JUMP', d: 'J _ M P', a: 'U', x: ['A', 'O', 'E'] }, 
+                { w: 'HAND', d: 'H _ N D', a: 'A', x: ['O', 'U', 'E'] }, 
+                { w: 'NEST', d: 'N _ S T', a: 'E', x: ['A', 'O', 'U'] }, 
+                { w: 'TENT', d: 'T _ N T', a: 'E', x: ['A', 'O', 'U'] }, 
+                { w: 'DRUM', d: 'D R _ M', a: 'U', x: ['O', 'E', 'I'] }, 
+                { w: 'BLUE', d: 'B L _ E', a: 'U', x: ['A', 'O', 'I'] }  
+            ];
+            words.forEach(w => add('spelling', `Missing Letter: ${w.d}`, createOptions(w.a, w.x), w.a, `Spells ${w.w}`));
+
+            // 5. RECOGNITION
+            const cats = [
+                { n: 'FOOD', r: ['🍎','🍌','🍕','🍪'], w: ['🚗','🧸','⏰','🔨'] },
+                { n: 'ANIMAL', r: ['🐶','🐱','🦁','🐸'], w: ['🍎','🎩','🚗','⭐'] },
+                { n: 'TOY', r: ['🧸','🪁','🚗','🪀'], w: ['🍎','👞','🌲','🏠'] }
+            ];
+            cats.forEach(c => {
+                c.r.forEach(r => add('recog', `Which is ${c.n}?`, createOptions(r, c.w), r, `Find the ${c.n}`));
+            });
+
+            // 6. SHAPES
+            const shapes = [
+                { n: 'CIRCLE', i: '🔴', w: ['⬛','🔺'] },
+                { n: 'SQUARE', i: '⬛', w: ['🔴','🔺'] },
+                { n: 'STAR', i: '⭐', w: ['⬛','🔴'] },
+                { n: 'HEART', i: '❤️', w: ['⬛','⭐'] }
+            ];
+            shapes.forEach(s => add('shape', `Find the ${s.n}`, createOptions(s.i, s.w), s.i, `Look for ${s.n}`));
+
+            // 7. COUNTING
+            ['🍎','⭐','🎈'].forEach(e => {
+                for(let c=3; c<=7; c++) {
+                    add('count', `Count: ${Array(c).fill(e).join(' ')}`, createOptions(`${c}`, [`${c+1}`, `${c-1}`]), `${c}`, "Count them!");
+                }
+            });
+
+            return bank;
+        };
+
+        const getBalancedQuiz = () => {
+            const bank = generateQuestionBank();
+            let history = [];
+            // Renamed history key
+            try { history = JSON.parse(localStorage.getItem('princess_quest_history')) || []; } catch(e){}
+
+            const select = (cat, count) => {
+                const available = bank[cat].filter(q => !history.includes(q.id));
+                const shuffled = available.sort(() => Math.random() - 0.5);
+                return shuffled.slice(0, count);
+            };
+
+            let quiz = [
+                ...select('addition', 2),
+                ...select('subtraction', 2),
+                ...select('logic', 2),
+                ...select('spelling', 3),
+                ...select('recog', 3),
+                ...select('shape', 2),
+                ...select('count', 1)
+            ];
+
+            if (quiz.length < 15) {
+                localStorage.removeItem('princess_quest_history');
+                return getBalancedQuiz(); 
+            }
+
+            const newIds = quiz.map(q => q.id);
+            const updatedHistory = [...history, ...newIds].slice(-100); 
+            localStorage.setItem('princess_quest_history', JSON.stringify(updatedHistory));
+
+            return quiz.sort(() => Math.random() - 0.5);
+        };
+
+        // --- ASSETS ---
+        const PUZZLE_OBJECTS = ["🧩", "🔒", "♟️", "🗝️", "🏆", "💎", "📜"];
+        const DECOY_OBJECTS = ["🪴", "🕰️", "🔮", "🏺", "👒", "🧸", "🍎", "🎻", "📚", "🕯️"];
+
+        const Furniture = ({ type }) => {
+            if (type === 'table') return (
+                <svg width="140" height="90" viewBox="0 0 140 90" className="drop-shadow-lg">
+                    <rect x="20" y="30" width="10" height="60" fill="#5d4037" />
+                    <rect x="110" y="30" width="10" height="60" fill="#5d4037" />
+                    <rect x="10" y="20" width="120" height="15" fill="#8d6e63" stroke="#3e2723" strokeWidth="2"/>
+                    <rect x="10" y="35" width="120" height="5" fill="#5d4037" />
+                </svg>
+            );
+            if (type === 'shelf') return (
+                <svg width="120" height="180" viewBox="0 0 120 180" className="drop-shadow-lg">
+                    <rect x="10" y="10" width="100" height="160" fill="#4e342e" stroke="#3e2723" strokeWidth="4"/>
+                    <rect x="15" y="50" width="90" height="8" fill="#8d6e63" />
+                    <rect x="15" y="100" width="90" height="8" fill="#8d6e63" />
+                    <rect x="15" y="150" width="90" height="8" fill="#8d6e63" />
+                </svg>
+            );
+            if (type === 'bed') return (
+                <svg width="180" height="100" viewBox="0 0 180 100" className="drop-shadow-lg">
+                    <rect x="10" y="60" width="10" height="30" fill="#5d4037" />
+                    <rect x="160" y="60" width="10" height="30" fill="#5d4037" />
+                    <rect x="10" y="40" width="160" height="30" fill="#3949ab" />
+                    <rect x="10" y="40" width="160" height="5" fill="#5c6bc0" /> 
+                    <rect x="20" y="30" width="40" height="20" fill="#fff" />
+                </svg>
+            );
+            return null;
+        };
+
+        const PixelPrincess = ({ walking }) => (
+            <div className={`relative w-40 h-56 ${walking ? 'princess-walk' : ''}`}>
+                <svg viewBox="0 0 40 60" className="w-full h-full drop-shadow-2xl">
+                    <rect x="6" y="8" width="28" height="32" fill="#ffb74d" />
+                    <rect x="12" y="12" width="16" height="14" fill="#ffccbc" />
+                    <rect x="15" y="16" width="2" height="2" fill="#000" />
+                    <rect x="23" y="16" width="2" height="2" fill="#000" />
+                    <rect x="16" y="22" width="8" height="2" fill="#d84315" /> 
+                    <rect x="10" y="26" width="20" height="24" fill="#00bcd4" />
+                    <rect x="8" y="30" width="4" height="12" fill="#ffccbc" />
+                    <rect x="28" y="30" width="4" height="12" fill="#ffccbc" />
+                    <rect x="14" y="50" width="4" height="10" fill="#ffccbc" />
+                    <rect x="22" y="50" width="4" height="10" fill="#ffccbc" />
+                    <rect x="13" y="56" width="6" height="4" fill="#3e2723" />
+                    <rect x="21" y="56" width="6" height="4" fill="#3e2723" />
+                </svg>
+            </div>
+        );
+
+        // --- GAME APP ---
+        const Game = () => {
+            const [gameState, setGameState] = useState('title'); 
+            const [level, setLevel] = useState(0);
+            const [mistakes, setMistakes] = useState(0);
+            const [hints, setHints] = useState(3);
+            const [feedback, setFeedback] = useState(null);
+            const [showHint, setShowHint] = useState(null);
+            const [xPos, setXPos] = useState(-20);
+            const [walking, setWalking] = useState(false);
+            const [gameQuestions, setGameQuestions] = useState([]);
+
+            useEffect(() => {
+                if (gameState === 'title') {
+                    setGameQuestions(getBalancedQuiz());
+                }
+            }, [gameState]);
+
+            const roomLayout = useMemo(() => {
+                const puzzleChar = PUZZLE_OBJECTS[Math.floor(Math.random() * PUZZLE_OBJECTS.length)];
+                const decoys = [...DECOY_OBJECTS].sort(() => Math.random() - 0.5).slice(0, 4);
+                const allItems = [{ char: puzzleChar, isTarget: true }, ...decoys.map(d => ({ char: d, isTarget: false }))];
+
+                const furns = [
+                    { id: 'table', type: 'table', left: 45, bottom: 25, slots: [{ x: 30, y: 80 }, { x: 100, y: 80 }] },
+                    { id: 'shelf', type: 'shelf', left: 80, bottom: 25, slots: [{ x: 60, y: 135 }, { x: 60, y: 85 }, { x: 60, y: 35 }] },
+                    { id: 'bed', type: 'bed', left: 10, bottom: 25, slots: [{ x: 90, y: 65 }] }
+                ];
+
+                const layout = furns.map(f => {
+                    const myItems = [];
+                    const availableSlots = [...f.slots];
+                    while (allItems.length > 0 && availableSlots.length > 0 && Math.random() > 0.2) {
+                        const item = allItems.pop();
+                        const slot = availableSlots.shift();
+                        myItems.push({ ...item, ...slot });
+                    }
+                    return { ...f, items: myItems };
+                });
+
+                if (!layout.some(f => f.items.some(i => i.isTarget))) {
+                    const target = { char: puzzleChar, isTarget: true };
+                    if (layout[0].items.length < 2) layout[0].items.push({ ...target, x: 70, y: 80 });
+                    else layout[0].items[0] = { ...target, x: 30, y: 80 }; 
+                }
+                return layout;
+            }, [level]);
+
+            const currentQuestion = gameQuestions[level] || { q: "Loading...", opts: [], ans: "" };
+
+            useEffect(() => {
+                if (gameState === 'playing') {
+                    setWalking(true);
+                    let p = -20;
+                    const walkIn = setInterval(() => {
+                        p += 1;
+                        setXPos(p);
+                        if (p >= 10) { clearInterval(walkIn); setWalking(false); }
+                    }, 20);
+                    return () => clearInterval(walkIn);
+                }
+            }, [gameState, level]);
+
+            const handleObjectClick = (item) => {
+                if (gameState !== 'playing') return;
+                if (item.isTarget) setGameState('solving');
+                else {
+                    setFeedback("Try Again! 🧐");
+                    setTimeout(() => setFeedback(null), 1000);
+                }
+            };
+
+            const handleAnswer = (opt) => {
+                if (opt === currentQuestion.ans) {
+                    setFeedback("CORRECT! ✨");
+                    setTimeout(() => {
+                        setFeedback(null);
+                        setGameState('exit');
+                        setWalking(true);
+                        let p = xPos;
+                        const walkOut = setInterval(() => {
+                            p += 1.5;
+                            setXPos(p);
+                            if (p >= 110) {
+                                clearInterval(walkOut);
+                                if (level === 14) setGameState('won');
+                                else { setLevel(l => l + 1); setXPos(-20); setGameState('playing'); }
+                            }
+                        }, 20);
+                    }, 1000);
+                } else {
+                    setMistakes(m => {
+                        const newM = m + 1;
+                        const chances = 5 - newM;
+                        let msg = "Try Again! ❌";
+                        if(chances === 2) msg = "⚠️ 2 Chances Left!";
+                        if(chances === 1) msg = "⚠️ 1 Chance Left!";
+                        
+                        setFeedback(msg);
+                        if (newM >= 5) setTimeout(() => setGameState('lost'), 2000);
+                        return newM;
+                    });
+                    setTimeout(() => setFeedback(null), 2000);
+                }
+            };
+
+            // Transition logic for loop
+            const transitionStyle = xPos < 0 ? 'none' : 'left 0.1s linear';
+
+            if (gameState === 'title') {
+                return (
+                    <div className="castle-room flex flex-col items-center justify-center bg-[#f4d1d1]">
+                        <div className="pixel-card p-12 text-center max-w-3xl">
+                            <h1 className="text-9xl text-[#24305e] mb-4">PRINCESS QUEST</h1>
+                            <p className="text-4xl text-[#c99e10] mb-8">THE CASTLE ESCAPE</p>
+                            <button onClick={() => setGameState('rules')} className="pixel-btn bg-[#24305e] text-white text-5xl px-12 py-4 hover:bg-[#34406e]">PLAY</button>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (gameState === 'rules') {
+                return (
+                    <div className="castle-room flex flex-col items-center justify-center bg-[#f8e9a1]">
+                        <div className="pixel-card p-10 max-w-3xl text-[#24305e]">
+                            <h2 className="text-6xl mb-8 border-b-4 border-[#24305e]">HOW TO PLAY</h2>
+                            <ul className="text-4xl space-y-6 list-disc pl-10 mb-10">
+                                <li>You are the Princess! 👑</li>
+                                <li>Find the <b>MAGIC OBJECT</b> on the furniture.</li>
+                                <li>Click it to solve a puzzle.</li>
+                                <li><b>Don't make 5 mistakes!</b></li>
+                            </ul>
+                            <button onClick={() => setGameState('playing')} className="pixel-btn bg-[#f76c6c] text-white text-4xl px-12 py-4 w-full">START!</button>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (gameState === 'won' || gameState === 'lost') {
+                return (
+                    <div className="h-screen flex flex-col items-center justify-center bg-black text-white">
+                        <h1 className="text-9xl mb-8">{gameState === 'won' ? 'YOU WON! 🎉' : 'GAME OVER 😢'}</h1>
+                        <button onClick={() => window.location.reload()} className="pixel-card p-8 text-4xl text-black">PLAY AGAIN</button>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="castle-room overflow-hidden">
+                    {feedback && (
+                        <div className="absolute inset-0 flex items-center justify-center layer-feedback pointer-events-none">
+                            <div className="bg-black/90 text-white text-8xl p-12 rounded-xl animate-bounce border-8 border-white shadow-2xl z-[200] text-center">
+                                {feedback}
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="absolute top-[10%] left-1/2 transform -translate-x-1/2 opacity-60 pointer-events-none" style={{zIndex: 2}}>
+                        <div className="border-8 border-[#5d4037] bg-[#8d6e63] p-4 rounded-full shadow-lg">
+                             <div className="text-[#3e2723] text-8xl font-bold font-mono px-8 py-2 bg-[#d7ccc8] rounded-full border-4 border-[#5d4037]">
+                                {15 - level}
+                             </div>
+                        </div>
+                    </div>
+
+                    <div className="absolute inset-0 layer-furniture">
+                        {roomLayout.map((furn, i) => (
+                            <div key={i} className="absolute" style={{ left: `${furn.left}%`, bottom: `${furn.bottom}%` }}>
+                                <Furniture type={furn.type} />
+                                {furn.items.map((item, idx) => (
+                                    <div 
+                                        key={idx}
+                                        onClick={() => handleObjectClick(item)}
+                                        className="absolute text-6xl interactive-obj"
+                                        style={{ 
+                                            left: item.x, 
+                                            bottom: item.y, 
+                                            transform: 'translateX(-50%)' 
+                                        }}
+                                    >
+                                        {item.char}
+                                    </div>
+                                ))}
+                            </div>
+                        ))}
+                    </div>
+
+                    <div className="pixel-floor"></div>
+
+                    <div className="absolute bottom-[5%] layer-character" style={{ left: `${xPos}%`, transition: transitionStyle }}>
+                        <PixelPrincess walking={walking} />
+                    </div>
+
+                    <div className="absolute top-6 left-6 layer-ui flex gap-6">
+                        <div className="pixel-card px-6 py-2 text-4xl text-[#24305e]">FLOOR: {15-level}</div>
+                        <div className={`pixel-card px-6 py-2 text-4xl ${(5-mistakes) <= 2 ? 'text-red-600 animate-pulse font-bold' : 'text-[#24305e]'}`}>
+                            MISTAKES: {mistakes}/5
+                        </div>
+                    </div>
+
+                    {gameState === 'solving' && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/70 layer-modal">
+                            <div className="pixel-card p-10 max-w-2xl w-full mx-4 relative">
+                                <h2 className="text-4xl text-[#24305e] font-bold mb-6 border-b-4 border-[#24305e]">PUZZLE TIME</h2>
+                                <p className="text-5xl text-black mb-10">{currentQuestion.q}</p>
+                                <div className="grid gap-4">
+                                    {currentQuestion.opts.map((opt, i) => (
+                                        <button key={i} onClick={() => handleAnswer(opt)} className="pixel-btn w-full p-6 text-5xl bg-[#f8e9a1] hover:bg-[#fff9c4]">
+                                            {opt}
+                                        </button>
+                                    ))}
+                                </div>
+                                <div className="mt-8 flex justify-between items-center">
+                                    <button onClick={() => { if(hints > 0) { setHints(h => h-1); setShowHint(currentQuestion.hint); setTimeout(() => setShowHint(null), 3000); }}} className="pixel-btn bg-[#24305e] text-white px-6 py-3 text-2xl">
+                                        🧚 HINT ({hints})
+                                    </button>
+                                    {showHint && <div className="text-2xl text-[#24305e] italic">{showHint}</div>}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<Game />);
+    </script>
+</body>
+</html>
